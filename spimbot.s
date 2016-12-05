@@ -340,7 +340,7 @@ break_refill:
 	li $t0, 0
 	sw $t0, capacity
 wait:
-	bge $t0, 1000000, continue
+	bge $t0, 670000, continue
 	add $t0, $t0, 1
 	j wait
 continue:
