@@ -50,12 +50,12 @@ REQUEST_PUZZLE_INT_MASK = 0x800
 .data
 # data things go here
 
-.align 2
+#num of refills
+capacity: .word 0
+outer_capacity: .word 0
 
 #boolean to decide if it burns everything to the ground (initially set to 0)
 lol420xd: .word 0
-#boolean to decide if endgame
-shmurda: .word 0
 
 #space for array of tiles
 tiles: .space 1600
@@ -66,18 +66,16 @@ solution: .space 328
 
 ###Variables for movement
 
-#location to move to
+#x location to move to
 x: .word 0
 y: .word 0
-#startX: .word 165
-#startY: .word 165
+
 .text
-
-	#######MAIN SPIMBOT SCRIPT#########
 main:
+	# go wild
+	# the world is your oyster :)
 
-setup:	#######SPIMBOT SETUP, ALLOWING INTERRUPTS, SCANNING TILES, ETC.############
-	
+#################SET UP###########################################
 	#Store TILE Information into array tiles
 	la $t0, tiles
 	sw $t0, TILE_SCAN
@@ -85,188 +83,141 @@ setup:	#######SPIMBOT SETUP, ALLOWING INTERRUPTS, SCANNING TILES, ETC.##########
 	#Enable Interrupts
 	li	$t4, TIMER_MASK		# timer interrupt enable bit
 	or	$t4, $t4, BONK_MASK	# bonk interrupt bit
-	or  	$t4, $t4, MAX_GROWTH_INT_MASK #max growth interrupt bit
+	#or  	$t4, $t4, MAX_GROWTH_INT_MASK #max growth interrupt bit
 	or	$t4, $t4, REQUEST_PUZZLE_INT_MASK #puzzle interrupt enable bit
 	or	$t4, $t4, 1		# global interrupt enable
 	mtc0	$t4, $12		# set interrupt mask (Status register)
 
-start:	####ACTUAL SPIMBOT SCRIPT START########
-
-	#Move to start of territory and begin seeding - Territory is tile (55) to edge and (55) to (58)
-	li $t0, 165
-	sw $t0, x
-	li $t0, 105
-	sw $t0, y
-
-	jal move_bot
 	
-	j stagger_seed
-
-##########################################################################################################
-stagger_seed:	####Function for seeding plants######
 	
-	sub $sp, $sp, 20
-	sw $ra, 0($sp)
-	sw $s0, 4($sp)
-	sw $s1, 8($sp)
-	sw $s2, 12($sp)
-	sw $s3, 16($sp)
-	#sw $s4, 20($sp)
+	j seeding
 
-	#if number of seeds in inventory is not 10, do not begin to seed
-	lw $t0, GET_NUM_SEEDS
-	bne $t0, 18, fetch
-fetch:
-	jal get_seed_puzzle
-	lw $ra, 0($sp)
+	#Move to Position 0,0
+###############Helper Functions####################
+update:
+	la $t0, tiles
+	sw $t0, TILE_SCAN
 
-	#update tiles
-	#la $s4, tiles
-	#sw $s4, TILE_SCAN
+########Move#################
+move_bot:
+	#move SPIMBot to the x coordinate of the plant
+	lw $t0, BOT_X				
+	lw $t1, x
 
-	#set resource type to fire starters
-	li $t0,  2
-	sw $t0, SET_RESOURCE_TYPE	
+#handles if bot is already at correct x coord
+x_equal:
+	beq $t0, $t1, y_set
 	
-	#load puzzle address into s2
-	la $s2, puzzle
-
-	#load even/odd type into s3 (0 is odd, 1 is even)
-	li $s3, 1
-
-	# seed first tile in territory
-	sw $0, SEED_TILE
+#handles if x is greater than target
+x_greater:
+	blt $t0, $t1, x_lesser 
+	li $t2, 180
+	sw $t2, ANGLE
+	li $t2, 1
+	sw $t2, ANGLE_CONTROL		# turns SPIMBot to the left
+	li $t2, 4
+	sw $t2, VELOCITY		# drive
 	
-	# move to next position (for first time step )
-	lw $s0, x
-	lw $s1, y
-	add $s0, $s0, 60
-	#add $s1, $s1, 60
-	#sw $s0, x
-	#sw $s1, y	
+	j x_move
 
+#handles if x is lesser than target
+x_lesser:	
+	bgt $t0, $t1, x_move
+	li $t2, 0
+	sw $t2, ANGLE
+	li $t2, 1
+	sw $t2, ANGLE_CONTROL		#turns SPIMBot to the right
+	li $t2, 4
+	sw $t2, VELOCITY		#drive
+
+	j x_move
+
+x_move:
+	lw $t0, BOT_X
+	sub $t0, $t0, $t1
+	abs $t0, $t0
+
+	#bne $t3, $t4, x_move
+	bgt $t0, 3, x_move	
+	li $t2, 0
+	sw $t2, VELOCITY	
+
+y_set:
+	# move SPIMbot to y-coord
+	lw $t0, BOT_Y			
+	lw $t1, y
+
+#handles if bot is already at correct y coord
+y_equal:
+	beq $t0, $t1, arrival
+
+y_greater: 
+	blt $t0, $t1, y_lesser
+	li $t2, -90
+	sw $t2, ANGLE
+	li $t2, 1
+	sw $t2, ANGLE_CONTROL		# turns SPIMBot to the left
+	li $t2, 4
+	sw $t2, VELOCITY		# drive
 	
-seed_fill: #begin filling out tiles in staggering pattern
-	
-	#handles if bot next location goes out of bounds in either dimension	
-	bge $s0, 300, handle_x_larger_seed
-	#bge $s1, 270, handle_y_larger
+	j y_move
 
-	#get a puzzle in the downtime
-	sw $s0, x
-	sw $s1, y
-	sw $s2, REQUEST_PUZZLE
-	
-	#move to new location and seed it
-	jal move_bot_seed	
-		
-	sw $0, SEED_TILE
+y_lesser:
+	bgt $t0, $t1, y_move
+	li $t2, 90
+	sw $t2, ANGLE
+	li $t2, 1
+	sw $t2, ANGLE_CONTROL		#turns SPIMBot to the right
+	li $t2, 4
+	sw $t2, VELOCITY		#drive
 
-	#move to the next location
-	add $s0, $s0, 60
+	j y_move
 
-	j seed_fill
+y_move:
+	lw $t0, BOT_Y
+	sub $t0, $t0, $t1
+	abs $t0, $t0
 
-handle_x_larger_seed:
-	#sw $s2, REQUEST_PUZZLE
+	#bne $t3, $t4, y_move
+	bgt $t0, 3, y_move
+	li $t2, 0
+	sw $t2, VELOCITY
 
-	#move to next col
-	add $s1, $s1, 30
-	
-	#move to proper next col depending on row
-	beq $s3, 0, odd_seed
+arrival:
+	jr $ra
 
-even_seed:
-	sub $s3, $s3, 1
-	li $s0, 195
-	#handle if bot has left assigned territory
-	bge $s1, 300, handle_both_larger_seed
-	j seed_fill
-odd_seed:
-	add $s3, $s3, 1
-	li $s0, 165
+#############Base Bot Code#########################################
+
+###Process of seeding the tiles
+seeding:
+
+	#when seeding get water from the puzzle
 	#li $t0, 0
-	#handle if bot has left assigned territory
-	bge $s1, 300, handle_both_larger_seed
-	j seed_fill
+	#sw $t0, SET_RESOURCE_TYPE
 
-handle_both_larger_seed:
+	#If the number of seeds is not 0 continue seeding
+	lw $t0, GET_NUM_SEEDS
+	beq $t0, 0, refilling
 
-	sw $0, SEED_TILE
+	la $t0, tiles
+	sw $t0, TILE_SCAN
 
-	lw $ra, 0($sp)
-	lw $s0, 4($sp)
-	lw $s1, 8($sp)
-	lw $s2, 12($sp)
-	lw $s3, 16($sp)
-	add $sp, $sp, 20
+	#Find the first empty tile available for seeding - $t0 is the tiles array
+	li $t1, 0		#counter
 
-	li $t0, 1
-	sw $t0, lol420xd
-
-	j burn
-
-#######################################################################################################
-water:	####Function for watering plants#####
-
-
-######################################################################################################
-burn:	####Function for burning plants#####
-	
-	sub $sp, $sp, 8
-	sw $ra, 0($sp)
-	sw $s0, 4($sp)
-	sw $s1, 8($sp)
-
-	li $t0, 2 
-	sw $t0, SET_RESOURCE_TYPE
-
-	li $t0, 15
-	sw $t0, x
-	sw $t0, y
-
-	jal move_bot
-
-	#j end
-
-	#scan tiles
-	la $s0, tiles
-	sw $s0, TILE_SCAN
-
-	li $s1, 0
-
-	la $t5, puzzle
-
-burn_scan:
-	#request puzzle
-	#sw $t5, puzzle
-	
-	lw $t3, lol420xd
-	
-	#see if the plants are ready or not (transition from burn to harvest)
-	beq $t3, 0, harvest	
-
-	#if the tile is growing proceed to burn it if not keep looking
-	lw $t1, 0($s0)
-	lw $t2, 4($s0)
-	and $t1, $t1, $t2
-	#burn the plant
-	beq $t1, 1, EXPLOSION
-	#if you traverse entirely with no burn then get a puzzle and repeat
-	bge $s1, 99, burn
-
-continue_burn:
-	add $s1, $s1, 1
+seed_scan:
+	#if the tile is empty proceed to seed it if not keep looking
+	lw $t2, 0($t0)
+	beq $t2, 0, seed
+	#bge $t1, 100, watering	#move on to watering if all tiles are seeded
+	add $t1, $t1, 1
 	add $t0, $t0, 16
-	j burn_scan
-
-EXPLOSION:
-
-	sw $t5, REQUEST_PUZZLE
-
-	#get the x and y value of the tile that is growing ($t1 holds tile number)
+	j seed_scan
+	
+seed:
+	#get the x and y value of the midpoint of the tile that is unseeded ($t1 holds tile number)
 	li $t2, 10
-	div $s1, $t2
+	div $t1, $t2
 	mfhi $t2
 	li $t3, 30
 	mult $t2, $t3
@@ -275,7 +226,7 @@ EXPLOSION:
 	sw $t2, x
 
 	li $2, 10
-	div $s1, $t2
+	div $t1, $t2
 	mflo $t2
 	li $t3, 30
 	mult $t2, $t3
@@ -285,321 +236,126 @@ EXPLOSION:
 
 	#move to the proper location
 	jal move_bot
-
-	lw $ra, 0($sp)
 	
-	#Burn tile
-	sw $0, BURN_TILE 
-	sw $s0, TILE_SCAN
+	#Seed tile
+	sw $0, SEED_TILE 
+	
+	j seeding
+	
 
-	j continue_burn
+###Process of watering the tiles
+watering:
+	li $t0,1
+	j end
 
-########################################################################################################
-harvest: ####FUnction for harvesting plants#####
+	lw $t0, GET_NUM_WATER_DROPS
+	beq $t0, 0, harvesting
 
-	#deallocate stack frame from the burn method
-	lw $ra, 0($sp)
-	lw $s0, 4($sp)
-	add $sp, $sp, 8
+###Process of harvesting the tiles
+harvesting:
+	#j end
+	#Request seeds from the puzzle
+	#li $t0, 1
+	#sw $t0, SET_RESOURCE_TYPE
 
-	#move to start of territory
-	li $t0, 105
-	sw $t0, x
-	sw $t0, y
+	#la $t0, puzzle
 
+	#sw $t0, REQUEST_PUZZLE
+	#sw $t0, REQUEST_PUZZLE
+	#sw $t0, REQUEST_PUZZLE
+#refill:
+#	lw $t0, capacity
+#	beq $t0, 1, break_refill
+#	j refill
+#break_refill:
+	
+#	li $t0, 0
+#	sw $t0, capacity
+#wait:
+#	bge $t0, 100000, continue
+#	add $t0, $t0, 1
+#	j wait
+#continue:
+
+
+	la $t0, tiles
+	sw $t0, TILE_SCAN
+
+	#Find the first tile with a plant - $t0 is the tiles array
+	li $t1, 0		#counter
+
+harvest_scan:
+	#if the tile is growing proceed to harvest it if not keep looking
+	lw $t2, 0($t0)
+	beq $t2, 1, harvest
+	bge $t1, 100, seeding	#move on to seeding if all tiles are empty
+	add $t1, $t1, 1
+	add $t0, $t0, 16
+	j harvest_scan
+	
+harvest:	 	
+	#get the x and y value of the midpoint of the tile that is growing ($t1 holds tile number)
+	li $t2, 10
+	div $t1, $t2
+	mfhi $t2
+	li $t3, 30
+	mult $t2, $t3
+	mflo $t2
+	add $t2, $t2, 15
+	sw $t2, x
+
+	li $2, 10
+	div $t1, $t2
+	mflo $t2
+	li $t3, 30
+	mult $t2, $t3
+	mflo $t2
+	add $t2, $t2, 15
+	sw $t2, y
+
+	#move to the proper location
 	jal move_bot
-
-	#allocate stack frame for the harvest method
-	sub $sp, $sp, 20
-	sw $ra, 0($sp)
-	sw $s0, 4($sp)
-	sw $s1, 8($sp)
-	sw $s2, 12($sp)
-	sw $s3, 16($sp)
-
-	#set resource type to seeds
-	li $t0, 2
-	sw $t0, SET_RESOURCE_TYPE	
 	
-	#load puzzle address into s2
-	la $s2, puzzle
-
-	#load even/odd type into s3 (0 is odd, 1 is even)
-	li $s3, 1
-
-	# seed first tile in territory
-	sw $0, HARVEST_TILE
+	#Seed tile
+	sw $0, HARVEST_TILE 
 	
-	# move to next position (for first time step )
-	lw $s0, x
-	lw $s1, y
-	add $s0, $s0, 60
+	j harvesting
 
-harvest_fill: #begin harvesting tiles in staggering pattern
-	
-	#handles if bot next location goes out of bounds in either dimension	
-	bge $s0, 300, handle_x_larger_harvest
-	#bge $s1, 270, handle_y_larger
-
-	#get a puzzle in the downtime
-	sw $s0, x
-	sw $s1, y
-	sw $s2, REQUEST_PUZZLE
-
-	#move to new location and harvest it
-	jal move_bot_seed	
-		
-	sw $0, HARVEST_TILE
-
-	#move to the next location
-	add $s0, $s0, 60
-
-	j harvest_fill
-
-handle_x_larger_harvest:
-
-	#move to next col
-	add $s1, $s1, 30
-	
-	#move to proper next col depending on row
-	beq $s3, 0, odd_harvest
-
-even_harvest:
-	sub $s3, $s3, 1
-	li $s0, 195
-	#handle if bot has left assigned territory
-	bge $s1, 300, handle_both_larger_harvest
-	j harvest_fill
-odd_harvest:
-	add $s3, $s3, 1
-	li $s0, 165
-	#li $t0, 0
-	#handle if bot has left assigned territory
-	bge $s1, 300, handle_both_larger_harvest
-	j harvest_fill
-
-handle_both_larger_harvest:
-
-	sw $0, HARVEST_TILE
-	lw $ra, 0($sp)
-	lw $s0, 4($sp)
-	lw $s1, 8($sp)
-	lw $s2, 12($sp)
-	lw $s3, 16($sp)
-	add $sp, $sp, 20
-
-	#li $t0, 165
-	#sw $t0, x
-	#li $t0, 105
-	#sw $t0, y
-
-	#jal move_bot_seed
-	li $t0, 1
-	sw $t0, shmurda
-	sw $t0, lol420xd
-	j burn
-
-###############################YEA I KNOW YOU TRYING TO BE THAT HOT SAUCE########################################
-fuego: ###endgame: burn everything to the ground###
-
-#########################################################################################################
-get_seed_puzzle: ####Function to request a puzzle####
-
+refilling:
 	li $t0, 1
 	sw $t0, SET_RESOURCE_TYPE
 
-acquire_seeds:	
+	la $t0, puzzle
 
-	#lw $t0, GET_NUM_SEEDS
-	#bge $t0, 13, got_seeds
-	la $t1, puzzle
-	sw $t1, REQUEST_PUZZLE
-	sw $t1, REQUEST_PUZZLE
-	sw $t1, REQUEST_PUZZLE
-	#j acquire_seeds
+	sw $t0, REQUEST_PUZZLE
+	sw $t0, REQUEST_PUZZLE
+	sw $t0, REQUEST_PUZZLE
 
-got_seeds:
-	jr $ra
+	li $t0, 0
 
-get_burn_puzzle: ####Function to request a burn puzzle####
+refill:
+	lw $t0, capacity
+	beq $t0, 3, break_refill
+	j refill
+break_refill:
 	
-	#la $t0, puzzle
-	#sw $t0, REQUEST_PUZZLE
-	#sw $t0, REQUEST_PUZZLE
-	#sw $t0, REQUEST_PUZZLE
-	#j burn
+	li $t0, 0
+	sw $t0, capacity
+wait:
+	bge $t0, 10000, continue
+	add $t0, $t0, 1
+	j wait
+continue:
 
-#########################################################################################################
-move_bot: ####Function to physically move the bot####
-	#move SPIMBot to the x coordinate of the plant
-	sub $sp, $sp, 12
-	sw $ra, 0($sp)
 	
-	lw $a0, x				
-	lw $a1, y
 
-	sw $a0, 4($sp)
-	sw $a1, 8($sp)
-
-	lw $t0, BOT_X
-	lw $t1, BOT_Y
-
-	sub $a0, $a0, $t0
-	sub $a1, $a1, $t1
-
-	jal sb_arctan
-
-	lw $a0, 4($sp)
-	lw $a1, 8($sp)
-	lw $ra, 0($sp)
-
-	sw $v0, ANGLE
-	li $t0, 1
-	sw $t0, ANGLE_CONTROL
-	li $t0, 10 	
-	sw $t0, VELOCITY
-
-approach: 
-	lw $t0, BOT_X
-	lw $t1, BOT_Y
-
-	sub $t0, $t0, $a0
-	sub $t1, $t1, $a1
-
-	abs $t0, $t0
-	abs $t1,$t1
-
-	bgt $t0, 5, approach
-	bgt $t1, 5, approach
-	
-	li $t2, 0
-	sw $t2, VELOCITY
-
-	add $sp, $sp, 12
-
-	jr $ra
-
-move_bot_seed: ###FUNCTION FOR MOVING WHEN SEEDING###
-
-	sub $sp, $sp, 12
-	sw $ra, 0($sp)
-	
-	lw $a0, x				
-	lw $a1, y
-
-	sw $a0, 4($sp)
-	sw $a1, 8($sp)
-
-	lw $t0, BOT_X
-	lw $t1, BOT_Y
-
-	sub $a0, $a0, $t0
-	sub $a1, $a1, $t1
-
-	jal sb_arctan
-
-	lw $a0, 4($sp)
-	lw $a1, 8($sp)
-	lw $ra, 0($sp)
-
-	sw $v0, ANGLE
-	li $t0, 1
-	sw $t0, ANGLE_CONTROL
-	li $t0, 10 	
-	sw $t0, VELOCITY
-
-approach_seed: 
-	lw $t0, BOT_X
-	lw $t1, BOT_Y
-
-	sub $t0, $t0, $a0
-	sub $t1, $t1, $a1
-
-	abs $t0, $t0
-	abs $t1,$t1
-
-	bgt $t0, 5, approach_seed
-	bgt $t1, 5, approach_seed
-	
-	li $t2, 0
-	sw $t2, VELOCITY
-
-	add $sp, $sp, 12
-
-	jr $ra
-
-################Helper Function To Find the ArcTangent###############
-.globl sb_arctan
-.data
-three:	.float	3.0
-five:	.float	5.0
-PI:	.float	3.141592
-F180:	.float  180.0
-	
-.text
-
-# -----------------------------------------------------------------------
-# sb_arctan - computes the arctangent of y / x
-# $a0 - x
-# $a1 - y
-# returns the arctangent
-# -----------------------------------------------------------------------
-sb_arctan:
-	li	$v0, 0		# angle = 0;
-
-	abs	$t0, $a0	# get absolute values
-	abs	$t1, $a1
-	ble	$t1, $t0, no_TURN_90	  
-
-	## if (abs(y) > abs(x)) { rotate 90 degrees }
-	move	$t0, $a1	# int temp = y;
-	neg	$a1, $a0	# y = -x;      
-	move	$a0, $t0	# x = temp;    
-	li	$v0, 90		# angle = 90;  
-
-no_TURN_90:
-	bgez	$a0, pos_x 	# skip if (x >= 0)
-
-	## if (x < 0) 
-	add	$v0, $v0, 180	# angle += 180;
-
-pos_x:
-	mtc1	$a0, $f0
-	mtc1	$a1, $f1
-	cvt.s.w $f0, $f0	# convert from ints to floats
-	cvt.s.w $f1, $f1
-	
-	div.s	$f0, $f1, $f0	# float v = (float) y / (float) x;
-
-	mul.s	$f1, $f0, $f0	# v^^2
-	mul.s	$f2, $f1, $f0	# v^^3
-	l.s	$f3, three	# load 5.0
-	div.s 	$f3, $f2, $f3	# v^^3/3
-	sub.s	$f6, $f0, $f3	# v - v^^3/3
-
-	mul.s	$f4, $f1, $f2	# v^^5
-	l.s	$f5, five	# load 3.0
-	div.s 	$f5, $f4, $f5	# v^^5/5
-	add.s	$f6, $f6, $f5	# value = v - v^^3/3 + v^^5/5
-
-	l.s	$f8, PI		# load PI
-	div.s	$f6, $f6, $f8	# value / PI
-	l.s	$f7, F180	# load 180.0
-	mul.s	$f6, $f6, $f7	# 180.0 * value / PI
-
-	cvt.w.s $f6, $f6	# convert "delta" back to integer
-	mfc1	$t0, $f6
-	add	$v0, $v0, $t0	# angle += delta
-
-	jr 	$ra
-
-
-
-#################LOoop for testing#########################3
+#######LOOP FOR TESTING#######################
 end:
-	j end
+	sw $0, HARVEST_TILE
+wait_over:
+	j harvesting
+#############Interrupt Handler######################################
 
-########################INTERRUPT HANDLER########################################################
 .kdata				# interrupt handler data (separated just for readability)
 chunkIH:	.space 8	# space for two registers
 non_intrpt_str:	.asciiz "Non-interrupt exception\n"
@@ -644,39 +400,8 @@ interrupt_dispatch:			# Interrupt:
 	j	done
 
 bonk_interrupt:
-	sw $a1, BONK_ACK		# acknowledge interrupt
-
-	#recalculate location of target and send spimbot flying towards it	
-	
-	sub $sp, $sp, 16
-	sw $ra, 0($sp)
-	sw $a0, 4($sp)
-	sw $a1, 8($sp)
-	sw $v0, 12($sp)
-
-	lw $a0, x
-	lw $a1, y
-
-	lw $t0, BOT_X
-	lw $t1, BOT_Y
-
-	sub $a0, $a0, $t0
-	sub $a1, $a1, $t1
-
-	jal sb_arctan_handle
-
-	sw $v0, ANGLE
-	li $t0, 1
-	sw $t0, ANGLE_CONTROL
-	li $t0, 10
-	sw $t0, VELOCITY
-
-	lw $ra, 0($sp)
-	lw $a0, 4($sp)
-	lw $a1, 8($sp)
-	lw $v0, 12($sp)
-
-	add $sp, $sp, 16		
+	sw	$a1, BONK_ACK		# acknowledge interrupt
+	sw	$zero, VELOCITY		# ???
 
 	j	interrupt_dispatch	# see if other interrupts are waiting
 
@@ -694,55 +419,32 @@ timer_interrupt:
 	j	interrupt_dispatch	# see if other interrupts are waiting
 
 max_interrupt:
-	sw $a1, MAX_GROWTH_ACK		#acknowledge interrupt
+	#sw	$a1, MAX_GROWTH_ACK	#acknowledge interrupt
 	
-	lw $t0, shmurda
-
-	beq $t0, 1, interrupt_dispatch
-
-	#get location of the max growth trigerring tile 
-	lw $t1, MAX_GROWTH_TILE
-
-	#get the x value of the fire loc
-	srl $t2, $t1, 16			#$t2 is the x value of tile
-
-	#get the y value of the fire loc
-	sll $t3, $t1, 16
-	srl $t3, $t3, 16			# $t3 is the y value of tile
-
-	# if tile is not in my territory ignore
-	slt $t0, $t2, 5
-	#slt $t1, $t3, 5	
-
-	#and $t0, $t0, $t1
-
-	beq $t1, 1, theirs
-
-	li $t0, 0
-	sw $t0, lol420xd
-
-	j interrupt_dispatch
-
-theirs:
-
-	li $t0, 1
-	sw $t0, lol420xd
-
-	j interrupt_dispatch
-
+	#Have the bot harvest all the max growth plants
+	#la $t0, tiles
+	#sw $t0, TILE_SCAN
 
 puzzle_interrupt:
-	sw $a1, REQUEST_PUZZLE_ACK	#acknowledge interrupt
+	sw	$a1, REQUEST_PUZZLE_ACK	#acknowledge interrupt
 	
+	lw $t0, capacity
+	add $t0, $t0, 1
+	sw $t0, capacity
+
+	#lw $t3, VELOCITY
+	#li $t0, 0
+	#sw $t0, VELOCITY
+
 	sub $sp, $sp, 12
 	sw $ra, 0($sp)
 	sw $a0, 4($sp)
 	sw $a1, 8($sp)
 
+
 	#Zero the Solution
 	la $t0, solution
 	li $t1, 0		#counter
-
 zero_loop:
 	beq $t1, 82, solve
 	lw $t2, 0($t0)
@@ -751,7 +453,6 @@ zero_loop:
 	add $t0, $t0, 4
 	add $t1, $t1, 1
 	j zero_loop
-
 solve:
 	#Solve the puzzle
 	la 	$a0, solution
@@ -786,69 +487,7 @@ done:
 .set at 
 	eret
 
-
-
-#############################Helper Function###################################
-
-.globl sb_arctan_handle
-# -----------------------------------------------------------------------
-# sb_arctan - computes the arctangent of y / x
-# $a0 - x
-# $a1 - y
-# returns the arctangent
-# -----------------------------------------------------------------------
-sb_arctan_handle:
-	li	$v0, 0		# angle = 0;
-
-	abs	$t0, $a0	# get absolute values
-	abs	$t1, $a1
-	ble	$t1, $t0, no_TURN_90_handle	  
-
-	## if (abs(y) > abs(x)) { rotate 90 degrees }
-	move	$t0, $a1	# int temp = y;
-	neg	$a1, $a0	# y = -x;      
-	move	$a0, $t0	# x = temp;    
-	li	$v0, 90		# angle = 90;  
-
-no_TURN_90_handle:
-	bgez	$a0, pos_x_handle 	# skip if (x >= 0)
-
-	## if (x < 0) 
-	add	$v0, $v0, 180	# angle += 180;
-
-pos_x_handle:
-	mtc1	$a0, $f0
-	mtc1	$a1, $f1
-	cvt.s.w $f0, $f0	# convert from ints to floats
-	cvt.s.w $f1, $f1
-	
-	div.s	$f0, $f1, $f0	# float v = (float) y / (float) x;
-
-	mul.s	$f1, $f0, $f0	# v^^2
-	mul.s	$f2, $f1, $f0	# v^^3
-	l.s	$f3, three	# load 5.0
-	div.s 	$f3, $f2, $f3	# v^^3/3
-	sub.s	$f6, $f0, $f3	# v - v^^3/3
-
-	mul.s	$f4, $f1, $f2	# v^^5
-	l.s	$f5, five	# load 3.0
-	div.s 	$f5, $f4, $f5	# v^^5/5
-	add.s	$f6, $f6, $f5	# value = v - v^^3/3 + v^^5/5
-
-	l.s	$f8, PI		# load PI
-	div.s	$f6, $f6, $f8	# value / PI
-	l.s	$f7, F180	# load 180.0
-	mul.s	$f6, $f6, $f7	# 180.0 * value / PI
-
-	cvt.w.s $f6, $f6	# convert "delta" back to integer
-	mfc1	$t0, $f6
-	add	$v0, $v0, $t0	# angle += delta
-
-	jr 	$ra
-
-
-##########################PUZZLE SOLVER HELPER FUNCTIONS#############################################
-
+####################Puzzle Solving############################################
 .globl convert_highest_bit_to_int
 convert_highest_bit_to_int:
     move  $v0, $0   	      # result = 0
